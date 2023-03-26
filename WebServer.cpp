@@ -8,15 +8,36 @@
 #include <arpa/inet.h>
 // close(fd)
 #include <unistd.h>
+#include <sys/epoll.h>
+#include <fcntl.h>
 
 using namespace std;
 
-#define BUF_SIZE 1024
+#define MAX_EVENT_NUM 1024
+#define TCP_BUF_SIZE 1024
+
+// 设置为非阻塞
+int setnonblocking(int fd)
+{
+    int old_option=fcntl(fd,F_GETFL);
+    int new_option=old_option|O_NONBLOCK;
+    fcntl(fd,F_SETFL,new_option);
+    return old_option;
+}
 
 static bool stop=false;
 static void handle_term(int sig)
 {
     stop=true;
+}
+
+void addfd(int epollfd,int fd)
+{
+    epoll_event event;
+    event.data.fd=fd;
+    event.events=EPOLLIN|EPOLLET;
+    epoll_ctl(epollfd,EPOLL_CTL_ADD,fd,&event);
+    setnonblocking(fd);
 }
 
 int main(int argc, char const *argv[])
@@ -62,39 +83,67 @@ int main(int argc, char const *argv[])
 
     cout<<"...Listening"<<endl;
 
-    // 接受连接
-    int connfd;
-    char clientIP[INET_ADDRSTRLEN];
-    struct sockaddr_in clientAddr;
-    socklen_t clientAddrLen=sizeof(clientAddr);
+    // I/O复用 epoll
+    epoll_event events[MAX_EVENT_NUM];
+    int epollfd=epoll_create(5);
+    if(epollfd==-1)
+    {
+        cout<<"Error: epoll"<<endl;
+        return -1;
+    }
+    addfd(epollfd,sockfd);
+
 
     while(true)
     {
-        connfd=accept(sockfd,(struct sockaddr*)&clientAddr,&clientAddrLen);
-        if(connfd<0) cout<<"Error: accept"<<endl;
-        inet_ntop(AF_INET,&clientAddr.sin_addr,clientIP,INET_ADDRSTRLEN);
-        cout<<"...connect "<<clientIP<<":"<<clientAddr.sin_port<<endl;
-
-        char buf[BUF_SIZE];
-        
-        while(true)
+        int num=epoll_wait(epollfd,events,MAX_EVENT_NUM,-1);
+        if(num<0)
         {
-            memset(buf,0,sizeof(buf));
-            int ret=recv(connfd,buf,sizeof(buf),0);
-            if(ret<=0) 
-            {
-                cout<<"...disconnect "<<clientIP<<":"<<clientAddr.sin_port<<endl;
-                break;
-            }
-            buf[ret]='\0';
-            if(strcmp(buf,"exit")==0)
-            {
-                cout<<"...disconnect "<<clientIP<<":"<<clientAddr.sin_port<<endl;
-                break;
-            }
-            cout<<buf<<endl;
+            cout<<"epoll failure"<<endl;
+            break;
         }
-        close(connfd);
+
+        for(int i=0;i<num;++i)
+        {
+            int tempfd=events[i].data.fd;
+            if(tempfd==sockfd)
+            {
+                // 接受连接
+                struct sockaddr_in clientAddr;
+                socklen_t clientAddrLen=sizeof(clientAddr);
+                int connfd=accept(sockfd,(struct sockaddr*)&clientAddr,&clientAddrLen);
+                
+                if(connfd<0) cout<<"Error: accept"<<endl;
+                // 获取客户端信息
+                char clientIP[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET,&clientAddr.sin_addr,clientIP,INET_ADDRSTRLEN);
+                cout<<"...connect "<<clientIP<<":"<<clientAddr.sin_port<<endl;
+                
+                addfd(epollfd,connfd);
+            }
+            else if(events[i].events & EPOLLIN)
+            {
+                char buf[TCP_BUF_SIZE];
+        
+                while(true)
+                {
+                    memset(buf,'\0',TCP_BUF_SIZE);
+                    int ret=recv(tempfd,buf,TCP_BUF_SIZE-1,0);
+                    if(ret<=0) 
+                    {
+                        cout<<"...disconnect"<<endl;
+                        close(tempfd);
+                        break;
+                    }
+                    else
+                    {
+                        cout<<buf<<endl;
+                        // 避免阻塞
+                        break;
+                    }
+                }
+            }
+        }
     }
     close(sockfd);
     return 0;
