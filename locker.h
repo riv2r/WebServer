@@ -23,6 +23,7 @@ class sem
     {
         return sem_wait(&m_sem)==0;
     }
+    // request+1
     bool post()
     {
         return sem_post(&m_sem)==0;
