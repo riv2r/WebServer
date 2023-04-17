@@ -1,5 +1,4 @@
 #include "http_conn.h"
-#include <iostream>
 
 const char* ok_200_title="OK";
 const char* error_400_title="Bad Request";
@@ -113,7 +112,7 @@ bool http_conn::read()
     return true;
 }
 
-// 从状态机 用于解析出一行内容
+// 从状态机 用于解析单行HTTP报文
 http_conn::LINE_STATUS http_conn::parse_line()
 {
     char temp;
@@ -125,8 +124,6 @@ http_conn::LINE_STATUS http_conn::parse_line()
             if((m_checked_idx+1)==m_read_idx) return LINE_OPEN;
             else if(m_read_buf[m_checked_idx+1]=='\n')
             {
-                // 替换回车符\r和换行符\n
-                // 将m_checked_idx移动至未分析处
                 m_read_buf[m_checked_idx++]='\0';
                 m_read_buf[m_checked_idx++]='\0';
                 return LINE_OK;
@@ -147,7 +144,7 @@ http_conn::LINE_STATUS http_conn::parse_line()
     return LINE_OPEN;
 }
 
-// 从状态机 解析请求行 确定method url version
+// 主状态机 用于解析HTTP报文请求行 确定 m_method m_url m_version
 http_conn::HTTP_CODE http_conn::parse_request_line(char* text)
 {
     // METHOD URL HTTP_version\0
@@ -171,12 +168,16 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char* text)
     // m_version=HTTP_version\0
     *m_version++='\0';
     m_version+=strspn(m_version,"\t");
-
     if(strcasecmp(m_version,"HTTP/1.1")!=0) return BAD_REQUEST;
+
     if(strncasecmp(m_url,"http://",7)==0)
     {
         m_url+=7;
-        // 去掉http://
+        m_url=strchr(m_url,'/');
+    }
+    if(strncasecmp(m_url,"https://",8)==0)
+    {
+        m_url+=8;
         m_url=strchr(m_url,'/');
     }
     if(!m_url || m_url[0]!='/') return BAD_REQUEST;
@@ -185,10 +186,10 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char* text)
     return NO_REQUEST;
 }
 
-// 从状态机 解析请求头部分
+// 主状态机 用于解析HTTP报文请求头
 http_conn::HTTP_CODE http_conn::parse_headers(char* text)
 {
-    // 遇到空行
+    // 判断空行 请求头
     if(text[0]=='\0')
     {
         if(m_content_length!=0)
@@ -216,11 +217,11 @@ http_conn::HTTP_CODE http_conn::parse_headers(char* text)
         text+=strspn(text," \t");
         m_host=text;
     }
-    else std::cout<<"oop! unknow header"<<text<<std::endl;
+    else printf("oop! unknow header: %s\n",text); 
     return NO_REQUEST;
 }
 
-// 从状态机 解析请求数据 对于GET方法无用
+// 主状态机 用于解析HTTP报文请求体
 http_conn::HTTP_CODE http_conn::parse_content(char* text)
 {
     if(m_read_idx>=(m_content_length+m_checked_idx))
@@ -231,17 +232,16 @@ http_conn::HTTP_CODE http_conn::parse_content(char* text)
     return NO_REQUEST;
 }
 
-// 主状态机
+// 主状态机从 m_read_buf 读取并处理请求报文
 http_conn::HTTP_CODE http_conn::process_read()
 {
     LINE_STATUS line_status=LINE_OK;
     HTTP_CODE ret=NO_REQUEST;
     char* text=0;
-    while(((m_check_state==CHECK_STATE_CONTENT) && (line_status==LINE_OK)) || ((line_status=parse_line())==LINE_OK))
+    while((m_check_state==CHECK_STATE_CONTENT && line_status==LINE_OK) || ((line_status=parse_line())==LINE_OK))
     {
         text=get_line();
         m_start_line=m_checked_idx;
-        std::cout<<"got 1 http line: "<<text<<std::endl;
         
         switch(m_check_state)
         {
@@ -355,12 +355,15 @@ void http_conn::unmap()
     }
 }
 
-// 往写缓冲中写入待发送的数据
+// 写入 m_write_buf 通用函数
 bool http_conn::add_response(const char* format,...)
 {
     if(m_write_idx>=WRITE_BUFFER_SIZE) return false;
+    // 定义可变参数列表
     va_list arg_list;
+    // 将变量 arg_list 初始化为传入参数
     va_start(arg_list,format);
+    // 将 format 从 arg_list 写入 m_write_buf
     int len=vsnprintf(m_write_buf+m_write_idx,WRITE_BUFFER_SIZE-1-m_write_idx,format,arg_list);
 
     if(len>=(WRITE_BUFFER_SIZE-1-m_write_idx)) return false;
@@ -376,9 +379,7 @@ bool http_conn::add_status_line(int status,const char* title)
 
 bool http_conn::add_headers(int content_len)
 {
-    add_content_length(content_len);
-    add_linger();
-    add_blank_line();
+    return add_content_length(content_len) && add_linger() && add_blank_line();
 }
 
 bool http_conn::add_content_length(int content_len)
@@ -401,7 +402,6 @@ bool http_conn::add_content(const char* content)
     return add_response("%s",content);
 }
 
-// 根据服务器处理HTTP请求的结果 决定返回给客户端的内容
 bool http_conn::process_write(HTTP_CODE ret)
 {
     switch(ret)
@@ -469,5 +469,13 @@ bool http_conn::process_write(HTTP_CODE ret)
 // 线程池中的工作线程调用 处理HTTP请求的入口函数
 void http_conn::process()
 {
-    
+    HTTP_CODE read_ret=process_read();
+    if(read_ret==NO_REQUEST)
+    {
+        modfd(m_epollfd,m_sockfd,EPOLLIN);
+        return;
+    } 
+    bool write_ret=process_write(read_ret);
+    if(!write_ret) close_conn();
+    modfd(m_epollfd,m_sockfd,EPOLLOUT);
 }
