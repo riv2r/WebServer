@@ -5,7 +5,8 @@
 #include <cstdio>
 #include <exception>
 #include <pthread.h>
-#include "locker.h"
+
+#include "lock/locker.h"
 
 template <typename T>
 class threadpool
@@ -19,7 +20,7 @@ private:
     static void* worker(void* arg);
     void run();
 private:
-    int m_thread_number;            // 线程池中线程数
+    int m_thread_number;            // 线程池中的线程数
     int m_max_requests;             // 请求队列中允许的最大请求数
     pthread_t* m_threads;           // 描述线程池的数组
     std::list<T*> m_workqueue;      // 请求队列
@@ -38,6 +39,7 @@ threadpool<T>::threadpool(int thread_number,int max_requests):m_thread_number(th
 
     for(int i=0;i<thread_number;++i)
     {
+        printf("create the %dth thread\n",i);
         if(pthread_create(m_threads+i,NULL,worker,this)!=0)
         {
             delete[] m_threads;
