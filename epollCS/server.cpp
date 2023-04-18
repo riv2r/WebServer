@@ -13,9 +13,18 @@
 #include <pthread.h>
 #include <signal.h>
 
+#include "../lock/locker.h"
+#include "../threadpool/threadpool.h"
+#include "../user_message/user_message.h"
+
+#define MAX_FD 128
 #define MAX_EVENT_NUM 1024
 #define BUF_SIZE 1024
 
+extern int addfd(int epollfd,int fd);
+extern int removefd(int epollfd,int fd);
+
+/*
 int setnonblocking(int fd)
 {
     int old_option=fcntl(fd,F_GETFL);
@@ -23,6 +32,7 @@ int setnonblocking(int fd)
     fcntl(fd,F_SETFL,new_option);
     return old_option;
 }
+*/
 
 static bool stop=false;
 // SIGTERM
@@ -31,6 +41,7 @@ static void handle_term(int sig)
     stop=true;
 }
 
+/*
 void addfd(int epollfd,int fd)
 {
     epoll_event event;
@@ -39,6 +50,7 @@ void addfd(int epollfd,int fd)
     epoll_ctl(epollfd,EPOLL_CTL_ADD,fd,&event);
     setnonblocking(fd);
 }
+*/
 
 int main(int argc, char* argv[])
 {
@@ -51,6 +63,20 @@ int main(int argc, char* argv[])
     }
     const char* ip=argv[1];
     int port=atoi(argv[2]);
+
+    threadpool<user_message>* pool=NULL;
+    try
+    {
+        pool=new threadpool<user_message>;
+    }
+    catch(...)
+    {
+        return 1;
+    }
+
+    user_message* users=new user_message[MAX_FD];
+    assert(users);
+    int user_count=0;
 
     int ret=0;
     struct sockaddr_in address;
@@ -72,6 +98,7 @@ int main(int argc, char* argv[])
     int epollfd=epoll_create(5);
     assert(epollfd!=-1);
     addfd(epollfd,listenfd);
+    user_message::u_epollfd=epollfd;
 
     while(true)
     {
@@ -90,35 +117,36 @@ int main(int argc, char* argv[])
                 struct sockaddr_in client_address;
                 socklen_t client_addrlength=sizeof(client_address);
                 int connfd=accept(listenfd,(struct sockaddr*)&client_address,&client_addrlength);
-                addfd(epollfd,connfd);
+                //addfd(epollfd,connfd);
+                users[connfd].init(connfd,client_address);
             }
             else if(events[i].events & EPOLLIN)
             {
-                char buf[BUF_SIZE];
-                while(true)
+                if(users[sockfd].read()) pool->append(users+sockfd);
+                else 
                 {
-                    memset(buf,'\0',BUF_SIZE);
-                    ret=recv(sockfd,buf,BUF_SIZE-1,0);
-                    if(ret<0) 
-                    {
-                        if(errno==EAGAIN || errno==EWOULDBLOCK) break;
-                        close(sockfd);
-                        break;
-                    }
-                    else if(ret==0) close(sockfd);
-                    else
-                    {
-                        if(strcmp(buf,"exit")!=0) printf("%s\n",buf);
-                    }
+                    users[sockfd].close_conn();
                 }
-            }
-            else
-            {
-                printf("something else happend\n");
+                /*
+                char buf[BUF_SIZE];
+                memset(buf,'\0',BUF_SIZE);
+                ret=recv(sockfd,buf,BUF_SIZE-1,0);
+                if(ret<0) 
+                {
+                    if(errno==EAGAIN || errno==EWOULDBLOCK) close(sockfd);
+                }
+                else if(ret==0){}
+                else
+                {
+                    if(strcmp(buf,"exit")!=0) printf("%s\n",buf);
+                }
+                */
             }
         }
     }
-
+    close(epollfd);
     close(listenfd);
+    delete[] users;
+    delete pool;
     return 0;
 }

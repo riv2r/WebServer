@@ -41,12 +41,15 @@ int main(int argc, char* argv[])
     if(connect(sockfd,(struct sockaddr*)&server_address,sizeof(server_address))<0)
     {
         printf("Connection failed\n");
+        close(sockfd);
+        return 0;
     }
 
     char data[BUF_SIZE];
 
     while(true)
     {
+        memset(data,'\0',BUF_SIZE);
         scanf("%s",data);
         send(sockfd,data,strlen(data),0);
         if(strcmp(data,"exit")==0)
