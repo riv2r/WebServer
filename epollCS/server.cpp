@@ -15,7 +15,7 @@
 
 #include "../lock/locker.h"
 #include "../threadpool/threadpool.h"
-#include "../user_message/user_message.h"
+#include "../http_conn/http_conn.h"
 
 #define MAX_FD 128
 #define MAX_EVENT_NUM 1024
