@@ -71,6 +71,7 @@ private:
     char h_read_buf[READ_BUFFER_SIZE];
     int h_checked_idx;
     int h_read_idx;
+    int h_start_idx;
     // HTTP请求报文 请求头部信息
     bool h_linger;
     int h_content_length;

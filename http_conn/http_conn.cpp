@@ -42,6 +42,7 @@ void http_conn::init(int sockfd,const sockaddr_in& addr)
     memset(h_read_buf,'\0',READ_BUFFER_SIZE);
     h_checked_idx=0;
     h_read_idx=0;
+    h_start_idx=0;
 
     h_linger=false;
     h_content_length=0;
@@ -179,26 +180,50 @@ http_conn::HTTP_CODE http_conn::parse_headers(char* text)
 
     return NO_REQUEST;
 }
-/*
-void http_conn::process_read()
+
+http_conn::HTTP_CODE http_conn::process_read()
 {
-    if(strcmp(read_buf,"\0")!=0)
+    LINE_STATUS line_status=LINE_OK;
+    HTTP_CODE http_code=NO_REQUEST;
+    char* text=0;
+    while((line_status=parse_line())==LINE_OK)
     {
-        char str_1[]="message from ";
-        char clientIP[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET,&u_address.sin_addr,clientIP,INET_ADDRSTRLEN);
-        char* str_2=clientIP;
-        char str_3[]=":";
-        strcat(strcat(str_1,str_2),str_3);
-        printf("%s%d ",str_1,u_address.sin_port);
-        time_t curtime;
-        time(&curtime);
-        char* str_4=ctime(&curtime);
-        strcat(str_4,read_buf);
-        printf("%s\n",str_4);
+        text=h_read_buf+h_start_idx;
+        h_start_idx=h_checked_idx;
+        switch(h_check_state)
+        {
+            case CHECK_STATE_REQUESTLINE:
+            {
+                http_code=parse_requestline(text);
+                if(http_code==BAD_REQUEST) return BAD_REQUEST;
+                break;
+            }
+            case CHECK_STATE_HEADER:
+            {
+                http_code=parse_headers(text);
+                if(http_code==BAD_REQUEST) return BAD_REQUEST;
+                else if(http_code==GET_REQUEST) return GET_REQUEST;
+                break;
+            }
+            default:
+            {
+                return INTERNAL_ERROR;
+            }
+        }
+    }
+    if(line_status==LINE_OPEN) return NO_REQUEST;
+    else return BAD_REQUEST;
+}
+
+void http_conn::process()
+{
+    HTTP_CODE ret=process_read();
+    if(ret==GET_REQUEST)
+    {
+        printf("PARSE SUCCESSFULLY!\n"); 
     }
 }
-*/
+
 /*
 void user_message::process()
 {

@@ -19,7 +19,6 @@
 
 #define MAX_FD 128
 #define MAX_EVENT_NUM 1024
-#define BUF_SIZE 1024
 
 extern int addfd(int epollfd,int fd);
 extern int removefd(int epollfd,int fd);
@@ -64,19 +63,19 @@ int main(int argc, char* argv[])
     const char* ip=argv[1];
     int port=atoi(argv[2]);
 
-    threadpool<user_message>* pool=NULL;
+    threadpool<http_conn>* pool=NULL;
     try
     {
-        pool=new threadpool<user_message>;
+        pool=new threadpool<http_conn>;
     }
     catch(...)
     {
         return 1;
     }
 
-    user_message* users=new user_message[MAX_FD];
+    http_conn* users=new http_conn[MAX_FD];
     assert(users);
-    int user_count=0;
+    // int user_count=0;
 
     int ret=0;
     struct sockaddr_in address;
@@ -98,7 +97,7 @@ int main(int argc, char* argv[])
     int epollfd=epoll_create(5);
     assert(epollfd!=-1);
     addfd(epollfd,listenfd);
-    user_message::u_epollfd=epollfd;
+    http_conn::h_epollfd=epollfd;
 
     while(true)
     {
@@ -125,7 +124,7 @@ int main(int argc, char* argv[])
                 if(users[sockfd].read()) pool->append(users+sockfd);
                 else 
                 {
-                    users[sockfd].close_conn();
+                    users[sockfd].close_http_conn();
                 }
                 /*
                 char buf[BUF_SIZE];
