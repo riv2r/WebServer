@@ -141,6 +141,11 @@ int main(int argc, char* argv[])
                 }
                 */
             }
+            else if(events[i].events & EPOLLOUT)
+            {
+                users[sockfd].close_http_conn();
+            }
+            else {}
         }
     }
     close(epollfd);

@@ -12,7 +12,7 @@ void addfd(int epollfd,int fd)
 {
     epoll_event event;
     event.data.fd=fd;
-    event.events=EPOLLIN|EPOLLET;
+    event.events=EPOLLIN|EPOLLET|EPOLLRDHUP;
     epoll_ctl(epollfd,EPOLL_CTL_ADD,fd,&event);
     setnonblocking(fd);
 }
@@ -21,6 +21,14 @@ void removefd(int epollfd,int fd)
 {
     epoll_ctl(epollfd,EPOLL_CTL_DEL,fd,0);
     close(fd);
+}
+
+void modfd(int epollfd,int fd,int ev)
+{
+    epoll_event event;
+    event.data.fd=fd;
+    event.events=ev|EPOLLET|EPOLLRDHUP;
+    epoll_ctl(epollfd,EPOLL_CTL_MOD,fd,&event);
 }
 
 int http_conn::h_user_count=0;
@@ -222,6 +230,7 @@ void http_conn::process()
     {
         printf("PARSE SUCCESSFULLY!\n"); 
     }
+    modfd(h_epollfd,h_sockfd,EPOLLOUT);
 }
 
 /*
