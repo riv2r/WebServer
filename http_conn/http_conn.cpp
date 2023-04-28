@@ -1,5 +1,7 @@
 #include "http_conn.h"
 
+const char* html_root="/home/user/Desktop/WebServer/HTML";
+
 int setnonblocking(int fd)
 {
     int old_option=fcntl(fd,F_GETFL);
@@ -8,11 +10,12 @@ int setnonblocking(int fd)
     return old_option;
 }
 
-void addfd(int epollfd,int fd)
+void addfd(int epollfd,int fd,bool one_shot)
 {
     epoll_event event;
     event.data.fd=fd;
     event.events=EPOLLIN|EPOLLET|EPOLLRDHUP;
+    if(one_shot) event.events|=EPOLLONESHOT;
     epoll_ctl(epollfd,EPOLL_CTL_ADD,fd,&event);
     setnonblocking(fd);
 }
@@ -27,7 +30,7 @@ void modfd(int epollfd,int fd,int ev)
 {
     epoll_event event;
     event.data.fd=fd;
-    event.events=ev|EPOLLET|EPOLLRDHUP;
+    event.events=ev|EPOLLET|EPOLLONESHOT|EPOLLRDHUP;
     epoll_ctl(epollfd,EPOLL_CTL_MOD,fd,&event);
 }
 
@@ -38,7 +41,7 @@ void http_conn::init(int sockfd,const sockaddr_in& addr)
 {
     h_sockfd=sockfd;
     h_address=addr;
-    addfd(h_epollfd,sockfd);
+    addfd(h_epollfd,sockfd,true);
     ++h_user_count;
 
     h_method=GET;
@@ -210,7 +213,7 @@ http_conn::HTTP_CODE http_conn::process_read()
             {
                 http_code=parse_headers(text);
                 if(http_code==BAD_REQUEST) return BAD_REQUEST;
-                else if(http_code==GET_REQUEST) return GET_REQUEST;
+                else if(http_code==GET_REQUEST) return do_request();//GET_REQUEST;
                 break;
             }
             default:
@@ -223,13 +226,62 @@ http_conn::HTTP_CODE http_conn::process_read()
     else return BAD_REQUEST;
 }
 
+http_conn::HTTP_CODE http_conn::do_request()
+{
+    strcpy(h_file_path,html_root);
+    int len=strlen(html_root);
+    strncpy(h_file_path+len,h_url,FILE_PATH_LEN-len-1);
+    if(stat(h_file_path,&h_file_stat)<0) return NO_RESOURCE;
+    if(!(h_file_stat.st_mode & S_IROTH)) return FORBIDDEN_REQUEST;
+    if(S_ISDIR(h_file_stat.st_mode)) return BAD_REQUEST;
+    int fd=open(h_file_path,O_RDONLY);
+    h_file_buf=(char*)mmap(0,h_file_stat.st_size,PROT_READ,MAP_PRIVATE,fd,0);
+    close(fd);
+    return FILE_REQUEST;
+}
+
+void http_conn::unmap()
+{
+    if(h_file_buf)
+    {
+        munmap(h_file_buf,h_file_stat.st_size);
+        h_file_buf=0;
+    }
+}
+
+bool http_conn::process_write(HTTP_CODE http_code)
+{
+    if(http_code==FILE_REQUEST)
+    {
+        int ret=0;
+        int len=0;
+        ret=snprintf(h_write_buf,WRITE_BUFFER_SIZE-1,"%s %s\r\n","HTTP/1.1","200 OK");
+        len+=ret;
+        ret=snprintf(h_write_buf+len,WRITE_BUFFER_SIZE-1-len,"Content-Length: %d\r\n",int(h_file_stat.st_size));
+        len+=ret;
+        ret=snprintf(h_write_buf+len,WRITE_BUFFER_SIZE-1-len,"%s","\r\n");
+
+        struct iovec iv[2];
+        iv[0].iov_base=h_write_buf;
+        iv[0].iov_len=strlen(h_write_buf);
+        iv[1].iov_base=h_file_buf;
+        iv[1].iov_len=h_file_stat.st_size;
+        ret=writev(h_sockfd,iv,2);
+        unmap();
+    }
+    return true;
+}
+
 void http_conn::process()
 {
-    HTTP_CODE ret=process_read();
-    if(ret==GET_REQUEST)
+    HTTP_CODE read_ret=process_read();
+    if(read_ret==NO_REQUEST)
     {
-        printf("PARSE SUCCESSFULLY!\n"); 
+        modfd(h_epollfd,h_sockfd,EPOLLIN);
+        return; 
     }
+    bool write_ret=process_write(read_ret);
+    if(!write_ret) close_http_conn();
     modfd(h_epollfd,h_sockfd,EPOLLOUT);
 }
 

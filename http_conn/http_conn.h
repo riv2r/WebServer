@@ -12,11 +12,17 @@
 #include <string.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <sys/mman.h>
 
 class http_conn
 {
 public:
+    static const int FILE_PATH_LEN=200;
     static const int READ_BUFFER_SIZE=2048;
+    static const int WRITE_BUFFER_SIZE=1024;
     enum CHECK_STATE{CHECK_STATE_REQUESTLINE=0,
                      CHECK_STATE_HEADER,
                      CHECK_STATE_CONTENT};
@@ -30,7 +36,9 @@ public:
                    BAD_REQUEST,
                    FORBIDDEN_REQUEST,
                    INTERNAL_ERROR,
-                   CLOSED_CONNECTION};
+                   CLOSED_CONNECTION,
+                   NO_RESOURCE,
+                   FILE_REQUEST};
 
     enum METHOD{GET=0,
                 POST,
@@ -54,6 +62,10 @@ private:
     LINE_STATUS parse_line();
     HTTP_CODE parse_requestline(char* text);
     HTTP_CODE parse_headers(char* text);
+    HTTP_CODE do_request();
+private:
+    void unmap();
+    bool process_write(HTTP_CODE http_code);
 public:
     static int h_epollfd;
     static int h_user_count;
@@ -76,6 +88,13 @@ private:
     bool h_linger;
     int h_content_length;
     char* h_host;
+    // html信息
+    char h_file_path[FILE_PATH_LEN];
+    char* h_file_buf;
+    struct stat h_file_stat;
+    struct iovec h_iv[2];
+    // 写
+    char h_write_buf[WRITE_BUFFER_SIZE];
 };
 
 #endif

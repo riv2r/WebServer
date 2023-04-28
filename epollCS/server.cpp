@@ -20,7 +20,7 @@
 #define MAX_FD 128
 #define MAX_EVENT_NUM 1024
 
-extern int addfd(int epollfd,int fd);
+extern int addfd(int epollfd,int fd,bool one_shot);
 extern int removefd(int epollfd,int fd);
 
 /*
@@ -96,7 +96,7 @@ int main(int argc, char* argv[])
     epoll_event events[MAX_EVENT_NUM];
     int epollfd=epoll_create(5);
     assert(epollfd!=-1);
-    addfd(epollfd,listenfd);
+    addfd(epollfd,listenfd,false);
     http_conn::h_epollfd=epollfd;
 
     while(true)
@@ -119,13 +119,11 @@ int main(int argc, char* argv[])
                 //addfd(epollfd,connfd);
                 users[connfd].init(connfd,client_address);
             }
+            else if(events[i].events & (EPOLLRDHUP|EPOLLHUP|EPOLLERR)) users[sockfd].close_http_conn();
             else if(events[i].events & EPOLLIN)
             {
                 if(users[sockfd].read()) pool->append(users+sockfd);
-                else 
-                {
-                    users[sockfd].close_http_conn();
-                }
+                else users[sockfd].close_http_conn();
                 /*
                 char buf[BUF_SIZE];
                 memset(buf,'\0',BUF_SIZE);
