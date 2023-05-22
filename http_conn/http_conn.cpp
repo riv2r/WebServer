@@ -1,6 +1,22 @@
 #include "http_conn.h"
 
+const char* ok_200_title="OK";
+
+const char* error_400_title="Bad Request";
+const char* error_400_form="Your request has bad syntax or is inherently impossible to satisfy.\n";
+
+const char* error_403_title="Forbidden";
+const char* error_403_form="You do not have permission to get file from this server.\n";
+
+const char* error_404_title="Not Found";
+const char* error_404_form="The requested file was not found on this server.\n";
+
+const char* error_500_title="Internal Error";
+const char* error_500_form="There was an unusual problem serving the requested file.\n";
+
+
 const char* html_root="/home/user/Desktop/WebServer/HTML";
+
 
 int setnonblocking(int fd)
 {
@@ -58,6 +74,11 @@ void http_conn::init(int sockfd,const sockaddr_in& addr)
     h_linger=false;
     h_content_length=0;
     h_host=0;
+
+    memset(h_file_path,'\0',FILE_PATH_LEN);
+
+    memset(h_write_buf,'\0',WRITE_BUFFER_SIZE);
+    h_write_idx=0;
 }
 
 void http_conn::close_http_conn(bool real_close)
@@ -249,27 +270,147 @@ void http_conn::unmap()
     }
 }
 
+bool http_conn::add_response(const char* format,...)
+{
+    if(h_write_idx>=WRITE_BUFFER_SIZE) return false;
+    va_list arg_list;
+    va_start(arg_list,format);
+    int len=vsnprintf(h_write_buf+h_write_idx,WRITE_BUFFER_SIZE-1-h_write_idx,format,arg_list);
+    if(len>=(WRITE_BUFFER_SIZE-1-h_write_idx)) return false;
+    h_write_idx+=len;
+    va_end(arg_list);
+    return true;
+}
+
+bool http_conn::add_status_line(int status,const char* title)
+{
+    return add_response("%s %d %s\r\n","HTTP/1.1",status,title);
+}
+
+bool http_conn::add_headers(int content_length)
+{
+    bool flag1=add_content_length(content_length);
+    bool flag2=add_linger();
+    bool flag3=add_blank_line();
+    return flag1 && flag2 && flag3;
+}
+
+bool http_conn::add_content_length(int content_length)
+{
+    return add_response("Content-Length: %d\r\n",content_length);
+}
+
+bool http_conn::add_linger()
+{
+    return add_response("Connection: %s\r\n",h_linger?"keep-alive":"close");
+}
+
+bool http_conn::add_blank_line()
+{
+    return add_response("%s","\r\n");
+}
+
+bool http_conn::add_content(const char* content)
+{
+    return add_response("%s",content);
+}
+
 bool http_conn::process_write(HTTP_CODE http_code)
 {
-    if(http_code==FILE_REQUEST)
+    switch(http_code)
     {
-        int ret=0;
-        int len=0;
-        ret=snprintf(h_write_buf,WRITE_BUFFER_SIZE-1,"%s %s\r\n","HTTP/1.1","200 OK");
-        len+=ret;
-        ret=snprintf(h_write_buf+len,WRITE_BUFFER_SIZE-1-len,"Content-Length: %d\r\n",int(h_file_stat.st_size));
-        len+=ret;
-        ret=snprintf(h_write_buf+len,WRITE_BUFFER_SIZE-1-len,"%s","\r\n");
-
-        struct iovec iv[2];
-        iv[0].iov_base=h_write_buf;
-        iv[0].iov_len=strlen(h_write_buf);
-        iv[1].iov_base=h_file_buf;
-        iv[1].iov_len=h_file_stat.st_size;
-        ret=writev(h_sockfd,iv,2);
-        unmap();
+        case INTERNAL_ERROR:
+        {
+            add_status_line(500,error_500_title);
+            add_headers(strlen(error_500_form));
+            if(!add_content(error_500_form)) return false;
+            break;
+        }
+        case BAD_REQUEST:
+        {
+            add_status_line(400,error_400_title);
+            add_headers(strlen(error_400_form));
+            if(!add_content(error_400_form)) return false;
+            break;
+        }
+        case NO_RESOURCE:
+        {
+            add_status_line(404,error_404_title);
+            add_headers(strlen(error_404_form));
+            if(!add_content(error_404_form)) return false;
+            break;
+        }
+        case FORBIDDEN_REQUEST:
+        {
+            add_status_line(403,error_403_title);
+            add_headers(strlen(error_403_form));
+            if(!add_content(error_403_form)) return false;
+            break;
+        }
+        case FILE_REQUEST:
+        {
+            add_status_line(200,ok_200_title);
+            if(h_file_stat.st_size!=0)
+            {
+                add_headers(h_file_stat.st_size);
+                h_iv[0].iov_base=h_write_buf;
+                h_iv[0].iov_len=strlen(h_write_buf);
+                h_iv[1].iov_base=h_file_buf;
+                h_iv[1].iov_len=h_file_stat.st_size;
+                h_iv_count=2;
+                return true;
+            }
+        }
+        default:return false;
     }
+    h_iv[0].iov_base=h_write_buf;
+    h_iv[0].iov_len=strlen(h_write_buf);
+    h_iv_count=1;
     return true;
+}
+
+bool http_conn::write()
+{
+    int temp=0;
+    int bytes_have_send=0;
+    int bytes_to_send=h_write_idx;
+    if(bytes_to_send==0)
+    {
+        modfd(h_epollfd,h_sockfd,EPOLLIN);
+        init(h_sockfd,h_address);
+        return true;
+    }
+    while(1)
+    {
+        temp=writev(h_sockfd,h_iv,h_iv_count);
+        if(temp<=-1)
+        {
+            if(errno==EAGAIN)
+            {
+                modfd(h_epollfd,h_sockfd,EPOLLOUT);
+                return true;
+            }
+            unmap();
+            return false;
+        }
+        bytes_to_send-=temp;
+        bytes_have_send+=temp;
+        if(bytes_to_send<=bytes_have_send)
+        {
+            unmap();
+            if(h_linger)
+            {
+                init(h_sockfd,h_address);
+                modfd(h_epollfd,h_sockfd,EPOLLIN);
+                return true;
+            }
+            else
+            {
+                modfd(h_epollfd,h_sockfd,EPOLLIN);
+                return false;
+            }
+        }
+    }
 }
 
 void http_conn::process()
@@ -284,10 +425,3 @@ void http_conn::process()
     if(!write_ret) close_http_conn();
     modfd(h_epollfd,h_sockfd,EPOLLOUT);
 }
-
-/*
-void user_message::process()
-{
-    process_read();
-}
-*/
