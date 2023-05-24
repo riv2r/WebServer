@@ -124,20 +124,6 @@ int main(int argc, char* argv[])
             {
                 if(users[sockfd].read()) pool->append(users+sockfd);
                 else users[sockfd].close_http_conn();
-                /*
-                char buf[BUF_SIZE];
-                memset(buf,'\0',BUF_SIZE);
-                ret=recv(sockfd,buf,BUF_SIZE-1,0);
-                if(ret<0) 
-                {
-                    if(errno==EAGAIN || errno==EWOULDBLOCK) close(sockfd);
-                }
-                else if(ret==0){}
-                else
-                {
-                    if(strcmp(buf,"exit")!=0) printf("%s\n",buf);
-                }
-                */
             }
             else if(events[i].events & EPOLLOUT)
             {
