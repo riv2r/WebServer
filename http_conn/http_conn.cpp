@@ -172,6 +172,8 @@ http_conn::HTTP_CODE http_conn::parse_requestline(char* text)
 
     if(!h_url || h_url[0]!='/') return BAD_REQUEST;
 
+    if(strlen(h_url)==1) strcat(h_url,"home.html");
+
     h_check_state=CHECK_STATE_HEADER;
     return NO_REQUEST;
 }
@@ -207,9 +209,20 @@ http_conn::HTTP_CODE http_conn::parse_headers(char* text)
     }
     else
     {
-        printf("unknown header: %s\n",text);
+        //printf("unknown header: %s\n",text);
     }
 
+    return NO_REQUEST;
+}
+
+http_conn::HTTP_CODE http_conn::parse_content(char* text)
+{
+    if((h_content_length+h_checked_idx)<=h_read_idx)
+    {
+        text[h_content_length]='\0';
+        h_content=text;
+        return GET_REQUEST;
+    }
     return NO_REQUEST;
 }
 
@@ -218,7 +231,7 @@ http_conn::HTTP_CODE http_conn::process_read()
     LINE_STATUS line_status=LINE_OK;
     HTTP_CODE http_code=NO_REQUEST;
     char* text=0;
-    while((line_status=parse_line())==LINE_OK)
+    while((h_check_state==CHECK_STATE_CONTENT && line_status==LINE_OK) || (line_status=parse_line())==LINE_OK)
     {
         text=h_read_buf+h_start_idx;
         h_start_idx=h_checked_idx;
@@ -237,14 +250,20 @@ http_conn::HTTP_CODE http_conn::process_read()
                 else if(http_code==GET_REQUEST) return do_request();//GET_REQUEST;
                 break;
             }
+            case CHECK_STATE_CONTENT:
+            {
+                http_code=parse_content(text);
+                if(http_code==GET_REQUEST) return do_request();
+                line_status=LINE_OPEN;
+                break;
+            }
             default:
             {
                 return INTERNAL_ERROR;
             }
         }
     }
-    if(line_status==LINE_OPEN) return NO_REQUEST;
-    else return BAD_REQUEST;
+    return NO_REQUEST;
 }
 
 http_conn::HTTP_CODE http_conn::do_request()
@@ -276,7 +295,11 @@ bool http_conn::add_response(const char* format,...)
     va_list arg_list;
     va_start(arg_list,format);
     int len=vsnprintf(h_write_buf+h_write_idx,WRITE_BUFFER_SIZE-1-h_write_idx,format,arg_list);
-    if(len>=(WRITE_BUFFER_SIZE-1-h_write_idx)) return false;
+    if(len>=(WRITE_BUFFER_SIZE-1-h_write_idx))
+    {
+        va_end(arg_list);
+        return false;
+    }
     h_write_idx+=len;
     va_end(arg_list);
     return true;

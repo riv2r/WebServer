@@ -64,6 +64,7 @@ private:
     LINE_STATUS parse_line();
     HTTP_CODE parse_requestline(char* text);
     HTTP_CODE parse_headers(char* text);
+    HTTP_CODE parse_content(char* text);
     HTTP_CODE do_request();
 private:
     void unmap();
@@ -97,6 +98,8 @@ private:
     bool h_linger;
     int h_content_length;
     char* h_host;
+    // HTTP请求报文 请求数据信息
+    char* h_content;
     // html信息
     char h_file_path[FILE_PATH_LEN];
     char* h_file_buf;
