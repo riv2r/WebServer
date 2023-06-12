@@ -75,6 +75,8 @@ void http_conn::init(int sockfd,const sockaddr_in& addr)
     h_content_length=0;
     h_host=0;
 
+    h_content=0;
+
     memset(h_file_path,'\0',FILE_PATH_LEN);
 
     memset(h_write_buf,'\0',WRITE_BUFFER_SIZE);
@@ -270,7 +272,25 @@ http_conn::HTTP_CODE http_conn::do_request()
 {
     strcpy(h_file_path,html_root);
     int len=strlen(html_root);
-    strncpy(h_file_path+len,h_url,FILE_PATH_LEN-len-1);
+
+    const char* p=strrchr(h_url,'/');
+
+    if(*(p+1)=='0')
+    {
+        char *h_url_real=(char*)malloc(200*sizeof(char));
+        strcpy(h_url_real,"/reg.html");
+        strncpy(h_file_path+len,h_url_real,FILE_PATH_LEN-len-1);
+        free(h_url_real);
+    }
+    else if(*(p+1)=='1')
+    {
+        char *h_url_real=(char*)malloc(200*sizeof(char));
+        strcpy(h_url_real,"/log.html");
+        strncpy(h_file_path+len,h_url_real,FILE_PATH_LEN-len-1);
+        free(h_url_real);
+    }
+    else strncpy(h_file_path+len,h_url,FILE_PATH_LEN-len-1);
+
     if(stat(h_file_path,&h_file_stat)<0) return NO_RESOURCE;
     if(!(h_file_stat.st_mode & S_IROTH)) return FORBIDDEN_REQUEST;
     if(S_ISDIR(h_file_stat.st_mode)) return BAD_REQUEST;
@@ -384,7 +404,8 @@ bool http_conn::process_write(HTTP_CODE http_code)
                 return true;
             }
         }
-        default:return false;
+        default:
+            return false;
     }
     h_iv[0].iov_base=h_write_buf;
     h_iv[0].iov_len=strlen(h_write_buf);
@@ -396,7 +417,8 @@ bool http_conn::write()
 {
     int temp=0;
     int bytes_have_send=0;
-    int bytes_to_send=h_write_idx;
+    int iovec_ptr=0;
+    int bytes_to_send=h_write_idx+h_file_stat.st_size;
     if(bytes_to_send==0)
     {
         modfd(h_epollfd,h_sockfd,EPOLLIN);
@@ -406,10 +428,26 @@ bool http_conn::write()
     while(1)
     {
         temp=writev(h_sockfd,h_iv,h_iv_count);
-        if(temp<=-1)
+        if(temp>0)
         {
-            if(errno==EAGAIN)
+            bytes_have_send+=temp;
+            iovec_ptr=bytes_have_send-h_write_idx;
+        }
+        else if(temp<=-1)
+        {
+            if(errno==EAGAIN)// 缓冲区已满
             {
+                if(bytes_have_send>=h_iv[0].iov_len)
+                {
+                    h_iv[0].iov_len=0;
+                    h_iv[1].iov_base=h_file_buf+iovec_ptr;
+                    h_iv[1].iov_len=bytes_to_send;
+                }
+                else
+                {
+                    h_iv[0].iov_base=h_write_buf+bytes_have_send;
+                    h_iv[0].iov_len-=bytes_have_send;
+                }
                 modfd(h_epollfd,h_sockfd,EPOLLOUT);
                 return true;
             }
@@ -417,21 +455,16 @@ bool http_conn::write()
             return false;
         }
         bytes_to_send-=temp;
-        bytes_have_send+=temp;
-        if(bytes_to_send<=bytes_have_send)
+        if(bytes_to_send<=0)
         {
             unmap();
+            modfd(h_epollfd,h_sockfd,EPOLLIN);
             if(h_linger)
             {
                 init(h_sockfd,h_address);
-                modfd(h_epollfd,h_sockfd,EPOLLIN);
                 return true;
             }
-            else
-            {
-                modfd(h_epollfd,h_sockfd,EPOLLIN);
-                return false;
-            }
+            else return false;
         }
     }
 }
