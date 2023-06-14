@@ -2,16 +2,16 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <assert.h>
-#include <stdio.h>
+#include <cassert>
+#include <cstdio>
 #include <unistd.h>
-#include <errno.h>
-#include <string.h>
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
-#include <stdlib.h>
+#include <cstdlib>
 #include <sys/epoll.h>
 #include <pthread.h>
-#include <signal.h>
+#include <csignal>
 
 #include "../lock/locker.h"
 #include "../threadpool/threadpool.h"

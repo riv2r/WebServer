@@ -75,6 +75,7 @@ void http_conn::init(int sockfd,const sockaddr_in& addr)
     h_content_length=0;
     h_host=0;
 
+    h_cgi=0;
     h_content=0;
 
     memset(h_file_path,'\0',FILE_PATH_LEN);
@@ -155,7 +156,11 @@ http_conn::HTTP_CODE http_conn::parse_requestline(char* text)
 
     char* method=text;
     if(strcasecmp(method,"GET")==0) h_method=GET;
-    else if(strcasecmp(method,"POST")==0) h_method=POST;
+    else if(strcasecmp(method,"POST")==0)
+    {
+        h_method=POST;
+        h_cgi=1;
+    }
     else return BAD_REQUEST;
 
     h_url+=strspn(h_url," \t");
@@ -274,6 +279,43 @@ http_conn::HTTP_CODE http_conn::do_request()
     int len=strlen(html_root);
 
     const char* p=strrchr(h_url,'/');
+
+    if(h_cgi==1 && (*(p+1)=='2' || *(p+1)=='3'))
+    {
+        /*
+        0 注册
+        1 登录
+        2 注册检测
+        3 登录检测
+        */
+        char flag=*(p+1);
+
+        // char* h_content="user=xxx&password=xxx";
+        char name[100],password[100];
+        int idx;
+        int i=0;
+        for(idx=5;h_content[idx]!='&';++idx,++i) name[i]=h_content[idx];
+        name[i]='\0';
+
+        int j=0;
+        for(idx=idx+10;h_content[idx]!='\0';++idx,++j) password[j]=h_content[idx];
+        password[j]='\0';
+        
+        if(flag=='2')
+        {
+            if(h_users.find(name)==h_users.end())
+            {
+                h_users[name]=password;
+                strcpy(h_url,"/regOK.html");
+            }
+            else strcpy(h_url,"/regErr.html");
+        }
+        else if(flag=='3')
+        {
+            if(h_users.find(name)!=h_users.end() && h_users[name]==password) strcpy(h_url,"/logOK.html");
+            else strcpy(h_url,"/logErr.html");
+        }
+    }
 
     if(*(p+1)=='0')
     {

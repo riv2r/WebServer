@@ -4,19 +4,24 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <unistd.h>
-#include <errno.h>
-#include <string.h>
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/mman.h>
-#include <stdarg.h>
+#include <cstdarg>
+#include <unordered_map>
+#include <string>
+#include <iostream>
+
+using namespace std;
 
 class http_conn
 {
@@ -24,6 +29,7 @@ public:
     static const int FILE_PATH_LEN=200;
     static const int READ_BUFFER_SIZE=2048;
     static const int WRITE_BUFFER_SIZE=1024;
+
     enum CHECK_STATE{CHECK_STATE_REQUESTLINE=0,
                      CHECK_STATE_HEADER,
                      CHECK_STATE_CONTENT};
@@ -99,6 +105,7 @@ private:
     int h_content_length;
     char* h_host;
     // HTTP请求报文 请求数据信息
+    int h_cgi=0;
     char* h_content;
     // html信息
     char h_file_path[FILE_PATH_LEN];
@@ -109,6 +116,8 @@ private:
     // 写
     char h_write_buf[WRITE_BUFFER_SIZE];
     int h_write_idx;
+    // 用户账号密码信息
+    unordered_map<string,string> h_users;
 };
 
 #endif
