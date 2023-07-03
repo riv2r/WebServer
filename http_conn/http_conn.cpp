@@ -307,6 +307,13 @@ http_conn::HTTP_CODE http_conn::do_request()
             {
                 h_users[name]=password;
                 strcpy(h_url,"/regOK.html");
+                /*
+                cout<<"current users account info:"<<endl;
+                for(auto& m:h_users)
+                {
+                    cout<<"name:"<<m.first<<" password:"<<m.second<<endl;
+                }
+                */
             }
             else strcpy(h_url,"/regErr.html");
         }
