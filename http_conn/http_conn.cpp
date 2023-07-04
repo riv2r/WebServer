@@ -18,6 +18,27 @@ const char* error_500_form="There was an unusual problem serving the requested f
 const char* html_root="/home/user/Desktop/WebServer/HTML";
 
 
+void http_conn::init_mysql(mysql_conn_pool* connPool)
+{
+    MYSQL* conn=NULL;
+    connRAII mysqlConn(&conn,connPool);
+
+    if(mysql_query(conn,"SELECT username,password FROM user")) cout<<"SELECT error"<<endl;
+
+    MYSQL_RES* res=mysql_store_result(conn);
+
+    int num_fields=mysql_num_fields(res);
+
+    MYSQL_FIELD* fields=mysql_fetch_fields(res);
+
+    while(MYSQL_ROW row=mysql_fetch_row(res))
+    {
+        string t1(row[0]);
+        string t2(row[1]);
+        h_users[t1]=t2;
+    }
+}
+
 int setnonblocking(int fd)
 {
     int old_option=fcntl(fd,F_GETFL);
@@ -53,12 +74,23 @@ void modfd(int epollfd,int fd,int ev)
 int http_conn::h_user_count=0;
 int http_conn::h_epollfd=-1;
 
-void http_conn::init(int sockfd,const sockaddr_in& addr)
+void http_conn::init(int sockfd,const sockaddr_in& addr,string user,string pwd,string dbname)
 {
     h_sockfd=sockfd;
     h_address=addr;
     addfd(h_epollfd,sockfd,true);
     ++h_user_count;
+
+    strcpy(mysql_user,user.c_str());
+    strcpy(mysql_password,pwd.c_str());
+    strcpy(mysql_dbname,dbname.c_str());
+
+    init();
+}
+
+void http_conn::init()
+{
+    conn=NULL;
 
     h_method=GET;
     h_url=0;
@@ -303,10 +335,21 @@ http_conn::HTTP_CODE http_conn::do_request()
         
         if(flag=='2')
         {
+            char* mysql_insert_query=(char*)malloc(sizeof(char)*200);
+            strcpy(mysql_insert_query,"INSERT INTO user(username,password) VALUES(");
+            strcat(mysql_insert_query,"'");
+            strcat(mysql_insert_query,name);
+            strcat(mysql_insert_query,"','");
+            strcat(mysql_insert_query,password);
+            strcat(mysql_insert_query,"')");
             if(h_users.find(name)==h_users.end())
-            {
+            {   
+                h_lock.lock();
+                int res=mysql_query(conn,mysql_insert_query);
                 h_users[name]=password;
-                strcpy(h_url,"/regOK.html");
+                h_lock.unlock();
+                if(!res) strcpy(h_url,"/regOK.html");
+                else strcpy(h_url,"/regErr.html");
                 /*
                 cout<<"current users account info:"<<endl;
                 for(auto& m:h_users)
@@ -471,7 +514,7 @@ bool http_conn::write()
     if(bytes_to_send==0)
     {
         modfd(h_epollfd,h_sockfd,EPOLLIN);
-        init(h_sockfd,h_address);
+        init();
         return true;
     }
     while(1)
@@ -510,7 +553,7 @@ bool http_conn::write()
             modfd(h_epollfd,h_sockfd,EPOLLIN);
             if(h_linger)
             {
-                init(h_sockfd,h_address);
+                init();
                 return true;
             }
             else return false;

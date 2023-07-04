@@ -16,6 +16,7 @@
 #include "../lock/locker.h"
 #include "../threadpool/threadpool.h"
 #include "../http_conn/http_conn.h"
+#include "../mysql/mysql_conn_pool.h"
 
 #define MAX_FD 128
 #define MAX_EVENT_NUM 1024
@@ -63,18 +64,23 @@ int main(int argc, char* argv[])
     const char* ip=argv[1];
     int port=atoi(argv[2]);
 
+    http_conn* users=new http_conn[MAX_FD];
+    assert(users);
+
+    mysql_conn_pool* connPool=mysql_conn_pool::getInstance();
+    connPool->init();
+
     threadpool<http_conn>* pool=NULL;
     try
     {
-        pool=new threadpool<http_conn>;
+        pool=new threadpool<http_conn>(connPool);
     }
     catch(...)
     {
         return 1;
     }
 
-    http_conn* users=new http_conn[MAX_FD];
-    assert(users);
+    users->init_mysql(connPool);
     // int user_count=0;
 
     int ret=0;

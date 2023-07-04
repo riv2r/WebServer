@@ -7,13 +7,14 @@
 #include <pthread.h>
 
 #include "../lock/locker.h"
+#include "../mysql/mysql_conn_pool.h"
 
 template <typename T>
 class threadpool
 {
 public:
     // thread_number 线程池线程数量 max_requests 请求队列最多允许等待处理的请求数量
-    threadpool(int thread_number=8,int max_requests=10000);
+    threadpool(mysql_conn_pool* connPool,int thread_number=8,int max_requests=10000);
     ~threadpool();
     bool append(T* request);
 private:
@@ -27,10 +28,11 @@ private:
     locker m_queuelocker;           // 互斥锁
     sem m_queuestat;                // 是否有任务待处理
     bool m_stop;                    // 是否结束线程
+    mysql_conn_pool* m_connPool;    // 数据库
 };
 
 template <typename T>
-threadpool<T>::threadpool(int thread_number,int max_requests):m_thread_number(thread_number),m_max_requests(max_requests),m_threads(NULL),m_stop(false)
+threadpool<T>::threadpool(mysql_conn_pool* connPool,int thread_number,int max_requests):m_thread_number(thread_number),m_max_requests(max_requests),m_threads(NULL),m_stop(false),m_connPool(connPool)
 {
     if(thread_number<=0 || max_requests<=0) throw std::exception();
 
@@ -99,6 +101,7 @@ void threadpool<T>::run()
         m_workqueue.pop_front();
         m_queuelocker.unlock();
         if(!request) continue;
+        connRAII mysqlConn(&request->conn,m_connPool);
         request->process();
     }
 }

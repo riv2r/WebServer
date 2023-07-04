@@ -21,6 +21,9 @@
 #include <string>
 #include <iostream>
 
+#include "../lock/locker.h"
+#include "../mysql/mysql_conn_pool.h"
+
 using namespace std;
 
 class http_conn
@@ -57,14 +60,17 @@ public:
                 CONNECT,
                 PATCH};
 public:
-    http_conn(){};
-    ~http_conn(){};
+    http_conn(){}
+    ~http_conn(){}
 public:
-    void init(int sockfd,const sockaddr_in& addr);
+    void init(int sockfd,const sockaddr_in& addr,string user="root",string pwd="root",string dbname="webserverdb");
     void close_http_conn(bool real_close=true);
     void process();
     bool read();
     bool write();
+    void init_mysql(mysql_conn_pool* connPool);
+private:
+    void init();
 private:
     HTTP_CODE process_read();
     LINE_STATUS parse_line();
@@ -85,6 +91,7 @@ private:
 public:
     static int h_epollfd;
     static int h_user_count;
+    MYSQL* conn;
 private:
     // 客户端信息
     int h_sockfd;
@@ -118,6 +125,11 @@ private:
     int h_write_idx;
     // 用户账号密码信息
     unordered_map<string,string> h_users;
+    char mysql_user[100];
+    char mysql_password[100];
+    char mysql_dbname[100];
+    // 数据库
+    locker h_lock;
 };
 
 #endif
